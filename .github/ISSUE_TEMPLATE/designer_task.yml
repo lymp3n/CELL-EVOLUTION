@@ -4,7 +4,7 @@ description: |
   Отвечает: Тимлид / Продакт.
 title: "[DESIGN] "
 labels: ["type: design", "status: backlog"]
-assignees: ""
+assignees: []  # ИСПРАВЛЕНО: пустой массив вместо пустой строки
 body:
   - type: markdown
     attributes:
