@@ -43,7 +43,7 @@ jobs:
       run: |
         pip install pytest
         if [ -d "src/tests" ]; then
-          pytest src/tests/ -v --maxfail=3 --disable-warnings || true
+          pytest src/tests/ -v --maxfail=3 --disable-warnings
           echo "Код pytest: $?"
         else
           echo "Папка с тестами не найдена, пропускаем."
