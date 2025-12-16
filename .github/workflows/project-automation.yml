@@ -1,166 +1,84 @@
-name: Project Automation
+name: Project Board Automation
 on:
   issues:
-    types: [opened, labeled, unlabeled, closed, reopened]
-  pull_request:
-    types: [opened, closed, reopened, review_requested, review_request_removed]
-  project_card:
-    types: [created, moved, deleted]
+    types: [opened, labeled, closed]
 
 jobs:
-  manage-project-board:
+  sync-labels-to-columns:
     runs-on: ubuntu-latest
     steps:
-      - name: Get Project Data
-        id: project
-        run: |
-          echo "PROJECT_ID=1" >> $GITHUB_OUTPUT
-          echo "COLUMN_IDS=$(curl -s -H 'Authorization: token ${{ secrets.GITHUB_TOKEN }}' \
-            https://api.github.com/projects/$PROJECT_ID/columns \
-            | jq -r '.[] | select(.name) | "\(.name):\(.id)"' | tr '\n' ';')" >> $GITHUB_OUTPUT
-          
-      - name: Auto-move based on labels
-        if: github.event_name == 'issues'
+      - name: Move issue based on status label
         uses: actions/github-script@v6
+        env:
+          PROJECT_NUMBER: 1 # ЗАМЕНИТЕ ЭТО НАСТОЯЩИМ ID!
         with:
           script: |
             const { issue } = context.payload;
-            const columnMapping = {
+            const projectNumber = process.env.PROJECT_NUMBER;
+            
+            // Соответствие лейблов статуса и названий колонок в Канбане
+            const statusToColumn = {
+              'status: backlog': 'Backlog',
               'status: ready': 'Ready',
               'status: in progress': 'In progress',
               'status: in review': 'In review',
               'status: testing': 'Testing',
               'status: done': 'Done'
             };
-            
-            // Получаем все карточки проекта
-            const projectId = 1;
-            const columnsResponse = await github.rest.projects.listColumns({
-              project_id: projectId
+
+            // 1. Находим проект
+            const projects = await github.rest.projects.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
             });
-            
-            // Ищем карточку с этим issue
-            for (const column of columnsResponse.data) {
-              const cardsResponse = await github.rest.projects.listCards({
-                column_id: column.id
-              });
-              
-              const card = cardsResponse.data.find(c => 
-                c.content_url && c.content_url.includes(`/issues/${issue.number}`)
-              );
-              
-              if (card) {
-                // Проверяем лейблы issue
-                const issueResponse = await github.rest.issues.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issue.number
-                });
-                
-                const labels = issueResponse.data.labels.map(l => l.name);
-                
-                // Находим целевой столбец по лейблам
-                let targetColumn = null;
-                for (const [label, columnName] of Object.entries(columnMapping)) {
-                  if (labels.includes(label)) {
-                    targetColumn = columnsResponse.data.find(c => c.name === columnName);
-                    break;
-                  }
-                }
-                
-                // Если issue закрыт - перемещаем в Done
-                if (issue.state === 'closed') {
-                  targetColumn = columnsResponse.data.find(c => c.name === 'Done');
-                }
-                // Если issue открыт и нет лейбла статуса - перемещаем в Backlog
-                else if (issue.state === 'open' && !labels.some(l => l.startsWith('status:'))) {
-                  targetColumn = columnsResponse.data.find(c => c.name === 'Backlog');
-                }
-                
-                // Перемещаем карточку
-                if (targetColumn && targetColumn.id !== column.id) {
+            const project = projects.data.find(p => p.number == projectNumber);
+            if (!project) { console.log(`Проект #${projectNumber} не найден.`); return; }
+
+            // 2. Находим все колонки проекта
+            const columns = await github.rest.projects.listColumns({
+              project_id: project.id,
+            });
+
+            // 3. Определяем целевую колонку на основе лейблов issue
+            let targetColumnName = 'Backlog'; // По умолчанию
+            const statusLabels = issue.labels.filter(l => l.name.startsWith('status:'));
+            if (statusLabels.length > 0) {
+              const matchedColumn = statusToColumn[statusLabels[0].name];
+              if (matchedColumn) targetColumnName = matchedColumn;
+            }
+            if (issue.state === 'closed') targetColumnName = 'Done';
+
+            const targetColumn = columns.data.find(c => c.name === targetColumnName);
+            if (!targetColumn) { console.log(`Колонка "${targetColumnName}" не найдена.`); return; }
+
+            // 4. Ищем существующую карточку issue
+            const cards = await github.rest.projects.listCards({
+              column_id: targetColumn.id,
+            });
+            const existingCard = cards.data.find(c => c.content_url && c.content_url.endsWith(`/issues/${issue.number}`));
+
+            // 5. Если карточки нет в нужной колонке — создаем или перемещаем её
+            if (!existingCard) {
+              // Проверяем все колонки, может карточка уже есть в другой
+              for (const column of columns.data) {
+                const columnCards = await github.rest.projects.listCards({ column_id: column.id });
+                const cardInOtherColumn = columnCards.data.find(c => c.content_url && c.content_url.endsWith(`/issues/${issue.number}`));
+                if (cardInOtherColumn) {
+                  // Перемещаем в целевую колонку
                   await github.rest.projects.moveCard({
-                    card_id: card.id,
+                    card_id: cardInOtherColumn.id,
                     position: 'bottom',
                     column_id: targetColumn.id
                   });
-                  console.log(`Moved issue #${issue.number} to ${targetColumn.name}`);
+                  console.log(`Перемещена карточка для issue #${issue.number} в колонку "${targetColumnName}".`);
+                  return;
                 }
-                break;
               }
-            }
-          
-      - name: Auto-assign PR reviewers
-        if: github.event_name == 'pull_request' && github.event.action == 'opened'
-        uses: kentaro-m/auto-assign-action@v2.0.0
-        with:
-          configuration-path: '.github/auto_assign.yml'
-          
-      - name: Check PR requirements
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            const requiredLabels = ['type: bug', 'type: feature', 'type: enhancement'];
-            
-            const hasLabel = pr.labels.some(label => 
-              requiredLabels.includes(label.name)
-            );
-            
-            if (!hasLabel) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                labels: ['needs-triage']
+              // Если карточки нигде нет — создаем новую
+              await github.rest.projects.createCard({
+                column_id: targetColumn.id,
+                content_id: issue.id,
+                content_type: 'Issue'
               });
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: '⚠️ Пожалуйста, добавьте один из лейблов: `type: bug`, `type: feature`, `type: enhancement`'
-              });
-            }
-            
-      - name: Move PR to Testing on merge
-        if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            
-            // Найти связанные issue через комментарии "Fixes #123"
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number
-            });
-            
-            const fixRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi;
-            const fixedIssues = new Set();
-            
-            for (const comment of comments.data) {
-              const matches = comment.body.matchAll(fixRegex);
-              for (const match of matches) {
-                fixedIssues.add(parseInt(match[1]));
-              }
-            }
-            
-            // Переместить связанные issue в Testing
-            for (const issueNumber of fixedIssues) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                labels: ['status: testing']
-              });
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `✅ Фиксация выполнена в PR #${pr.number}. Перемещено в Testing для проверки.`
-              });
+              console.log(`Создана новая карточка для issue #${issue.number} в колонке "${targetColumnName}".`);
             }
