@@ -1,84 +1,328 @@
-name: Project Board Automation
+name: "🗂️ Sync Project Board with Issue Labels"
 on:
   issues:
-    types: [opened, labeled, closed]
+    types: [labeled, unlabeled, opened, closed, reopened]
+  pull_request_target:
+    types: [opened, closed, reopened, review_requested]
+
+permissions:
+  issues: write
+  pull-requests: write
+  repository-projects: write
 
 jobs:
-  sync-labels-to-columns:
+  sync-issue-to-project:
+    if: github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
-      - name: Move issue based on status label
-        uses: actions/github-script@v6
-        env:
-          PROJECT_NUMBER: 1 # ЗАМЕНИТЕ ЭТО НАСТОЯЩИМ ID!
-        with:
-          script: |
-            const { issue } = context.payload;
-            const projectNumber = process.env.PROJECT_NUMBER;
-            
-            // Соответствие лейблов статуса и названий колонок в Канбане
-            const statusToColumn = {
-              'status: backlog': 'Backlog',
-              'status: ready': 'Ready',
-              'status: in progress': 'In progress',
-              'status: in review': 'In review',
-              'status: testing': 'Testing',
-              'status: done': 'Done'
-            };
-
-            // 1. Находим проект
-            const projects = await github.rest.projects.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-            const project = projects.data.find(p => p.number == projectNumber);
-            if (!project) { console.log(`Проект #${projectNumber} не найден.`); return; }
-
-            // 2. Находим все колонки проекта
-            const columns = await github.rest.projects.listColumns({
-              project_id: project.id,
-            });
-
-            // 3. Определяем целевую колонку на основе лейблов issue
-            let targetColumnName = 'Backlog'; // По умолчанию
-            const statusLabels = issue.labels.filter(l => l.name.startsWith('status:'));
-            if (statusLabels.length > 0) {
-              const matchedColumn = statusToColumn[statusLabels[0].name];
-              if (matchedColumn) targetColumnName = matchedColumn;
-            }
-            if (issue.state === 'closed') targetColumnName = 'Done';
-
-            const targetColumn = columns.data.find(c => c.name === targetColumnName);
-            if (!targetColumn) { console.log(`Колонка "${targetColumnName}" не найдена.`); return; }
-
-            // 4. Ищем существующую карточку issue
-            const cards = await github.rest.projects.listCards({
-              column_id: targetColumn.id,
-            });
-            const existingCard = cards.data.find(c => c.content_url && c.content_url.endsWith(`/issues/${issue.number}`));
-
-            // 5. Если карточки нет в нужной колонке — создаем или перемещаем её
-            if (!existingCard) {
-              // Проверяем все колонки, может карточка уже есть в другой
-              for (const column of columns.data) {
-                const columnCards = await github.rest.projects.listCards({ column_id: column.id });
-                const cardInOtherColumn = columnCards.data.find(c => c.content_url && c.content_url.endsWith(`/issues/${issue.number}`));
-                if (cardInOtherColumn) {
-                  // Перемещаем в целевую колонку
-                  await github.rest.projects.moveCard({
-                    card_id: cardInOtherColumn.id,
-                    position: 'bottom',
-                    column_id: targetColumn.id
-                  });
-                  console.log(`Перемещена карточка для issue #${issue.number} в колонку "${targetColumnName}".`);
-                  return;
+      - name: 📋 Debug - Show event info
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Action: ${{ github.event.action }}"
+          echo "Issue: #${{ github.event.issue.number }}"
+          echo "State: ${{ github.event.issue.state }}"
+          echo "Labels: ${{ toJson(github.event.issue.labels) }}"
+      
+      - name: 🔍 Get project ID
+        id: get_project
+        run: |
+          PROJECT_ID=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!) {
+              repository(owner:$owner, name:$repo) {
+                projectsV2(first: 10, query: "CELL-EVOLUTION") {
+                  nodes {
+                    id
+                    title
+                  }
                 }
               }
-              // Если карточки нигде нет — создаем новую
-              await github.rest.projects.createCard({
-                column_id: targetColumn.id,
-                content_id: issue.id,
-                content_type: 'Issue'
-              });
-              console.log(`Создана новая карточка для issue #${issue.number} в колонке "${targetColumnName}".`);
-            }
+            }' -f owner="${{ github.repository_owner }}" -f repo="${{ github.event.repository.name }}" \
+            --jq '.data.repository.projectsV2.nodes[0].id')
+          
+          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🎯 Determine target column from labels
+        id: determine_column
+        run: |
+          # Определяем колонку на основе лейблов
+          COLUMN_NAME="Backlog"  # По умолчанию
+          
+          # Проверяем статус issue
+          if [ "${{ github.event.issue.state }}" = "closed" ]; then
+            COLUMN_NAME="Done"
+          else
+            # Ищем лейбл статуса
+            STATUS_LABELS="status: ready|status: in progress|status: in review|status: testing"
+            
+            # Получаем лейблы из события
+            LABELS='${{ toJson(github.event.issue.labels) }}'
+            
+            # Парсим лейблы (упрощенный вариант)
+            if echo "$LABELS" | grep -q "status: ready"; then
+              COLUMN_NAME="Ready"
+            elif echo "$LABELS" | grep -q "status: in progress"; then
+              COLUMN_NAME="In Progress"
+            elif echo "$LABELS" | grep -q "status: in review"; then
+              COLUMN_NAME="In Review"
+            elif echo "$LABELS" | grep -q "status: testing"; then
+              COLUMN_NAME="Testing"
+            elif echo "$LABELS" | grep -q "status: done"; then
+              COLUMN_NAME="Done"
+            fi
+          fi
+          
+          echo "COLUMN_NAME=$COLUMN_NAME" >> $GITHUB_OUTPUT
+          echo "Determined column: $COLUMN_NAME"
+      
+      - name: 📌 Get or create project item
+        id: get_item
+        run: |
+          # Ищем существующую карточку
+          ITEM_ID=$(gh api graphql -f query='
+            query($project:ID!, $issue:ID!) {
+              node(id: $project) {
+                ... on ProjectV2 {
+                  items(first: 20) {
+                    nodes {
+                      id
+                      content {
+                        ... on Issue {
+                          id
+                          number
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
+            -f issue="${{ github.event.issue.node_id }}" \
+            --jq '.data.node.items.nodes[] | select(.content.id == env.issue) | .id' 2>/dev/null || true)
+          
+          if [ -z "$ITEM_ID" ]; then
+            # Карточки нет, создаем новую
+            echo "Creating new project item..."
+            ITEM_ID=$(gh api graphql -f query='
+              mutation($project:ID!, $issue:ID!) {
+                addProjectV2ItemById(input: {projectId: $project, contentId: $issue}) {
+                  item {
+                    id
+                  }
+                }
+              }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
+              -f issue="${{ github.event.issue.node_id }}" \
+              --jq '.data.addProjectV2ItemById.item.id')
+            
+            echo "Created new item: $ITEM_ID"
+          else
+            echo "Found existing item: $ITEM_ID"
+          fi
+          
+          echo "ITEM_ID=$ITEM_ID" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🗂️ Move to target column
+        if: steps.get_item.outputs.ITEM_ID != ''
+        run: |
+          # Получаем ID колонки по имени
+          COLUMN_ID=$(gh api graphql -f query='
+            query($project:ID!) {
+              node(id: $project) {
+                ... on ProjectV2 {
+                  fields(first: 20) {
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                        options {
+                          id
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
+            --jq '.data.node.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == env.column) | .id' \
+            --arg column "${{ steps.determine_column.outputs.COLUMN_NAME }}")
+          
+          if [ -z "$COLUMN_ID" ]; then
+            echo "❌ Column '${{ steps.determine_column.outputs.COLUMN_NAME }}' not found"
+            exit 1
+          fi
+          
+          echo "Moving to column: ${{ steps.determine_column.outputs.COLUMN_NAME }} (ID: $COLUMN_ID)"
+          
+          # Обновляем статус карточки
+          gh api graphql -f query='
+            mutation($project:ID!, $item:ID!, $status:ID!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project
+                itemId: $item
+                fieldId: "status"
+                value: {
+                  singleSelectOptionId: $status
+                }
+              }) {
+                projectV2Item {
+                  id
+                }
+              }
+            }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
+            -f item="${{ steps.get_item.outputs.ITEM_ID }}" \
+            -f status="$COLUMN_ID"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-pr-to-project:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📋 Debug PR info
+        run: |
+          echo "PR: #${{ github.event.pull_request.number }}"
+          echo "State: ${{ github.event.pull_request.state }}"
+          echo "Merged: ${{ github.event.pull_request.merged }}"
+      
+      - name: 🔍 Find related issue
+        id: find_issue
+        run: |
+          # Ищем issue, упомянутые в PR
+          ISSUE_NUMBERS=()
+          
+          # Ищем в заголовке
+          if [[ "${{ github.event.pull_request.title }}" =~ #[0-9]+ ]]; then
+            ISSUE_NUMBERS+=($(echo "${{ github.event.pull_request.title }}" | grep -o '#[0-9]\+' | sed 's/#//'))
+          fi
+          
+          # Ищем в теле PR
+          if [[ "${{ github.event.pull_request.body }}" =~ #[0-9]+ ]]; then
+            ISSUE_NUMBERS+=($(echo "${{ github.event.pull_request.body }}" | grep -o '#[0-9]\+' | sed 's/#//'))
+          fi
+          
+          # Ищем в коммитах
+          COMMIT_MSG=$(gh pr view "${{ github.event.pull_request.number }}" --json commits --jq '.commits[].message' 2>/dev/null || true)
+          if [[ "$COMMIT_MSG" =~ #[0-9]+ ]]; then
+            ISSUE_NUMBERS+=($(echo "$COMMIT_MSG" | grep -o '#[0-9]\+' | sed 's/#//'))
+          fi
+          
+          # Убираем дубликаты
+          UNIQUE_ISSUES=($(echo "${ISSUE_NUMBERS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+          
+          if [ ${#UNIQUE_ISSUES[@]} -gt 0 ]; then
+            echo "Found issues: ${UNIQUE_ISSUES[@]}"
+            echo "ISSUE_NUMBERS=${UNIQUE_ISSUES[0]}" >> $GITHUB_OUTPUT
+          else
+            echo "No related issues found"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🎯 Update issue status based on PR
+        if: steps.find_issue.outputs.ISSUE_NUMBERS != ''
+        run: |
+          ISSUE_NUM="${{ steps.find_issue.outputs.ISSUE_NUMBERS }}"
+          
+          # Определяем новый статус
+          if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
+            NEW_STATUS="status: testing"
+            echo "PR merged, moving issue #$ISSUE_NUM to testing"
+          elif [ "${{ github.event.pull_request.state }}" = "closed" ]; then
+            NEW_STATUS="status: in progress"
+            echo "PR closed without merge, moving issue #$ISSUE_NUM back to in progress"
+          else
+            # PR открыт
+            REVIEWERS=$(gh pr view "${{ github.event.pull_request.number }}" --json reviews --jq '.reviews[].author.login' 2>/dev/null || true)
+            if [ -n "$REVIEWERS" ]; then
+              NEW_STATUS="status: in review"
+              echo "PR has reviews, moving issue #$ISSUE_NUM to in review"
+            else
+              NEW_STATUS="status: in progress"
+              echo "PR opened, issue #$ISSUE_NUM stays in progress"
+            fi
+          fi
+          
+          # Обновляем лейблы issue
+          CURRENT_LABELS=$(gh issue view "$ISSUE_NUM" --json labels --jq '.labels[].name' 2>/dev/null || true)
+          
+          # Удаляем старые статус-лейблы
+          for label in $CURRENT_LABELS; do
+            if [[ "$label" == status:* ]]; then
+              echo "Removing label: $label"
+              gh issue edit "$ISSUE_NUM" --remove-label "$label" || true
+            fi
+          done
+          
+          # Добавляем новый статус
+          echo "Adding label: $NEW_STATUS"
+          gh issue edit "$ISSUE_NUM" --add-label "$NEW_STATUS"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  weekly-cleanup:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🧹 Clean up old 'Done' items
+        run: |
+          # Получаем проект
+          PROJECT_ID=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!) {
+              repository(owner:$owner, name:$repo) {
+                projectsV2(first: 1, query: "CELL-EVOLUTION") {
+                  nodes {
+                    id
+                  }
+                }
+              }
+            }' -f owner="${{ github.repository_owner }}" -f repo="${{ github.event.repository.name }}" \
+            --jq '.data.repository.projectsV2.nodes[0].id')
+          
+          # Находим задачи в колонке "Done", которые завершены более 2 недель назад
+          gh api graphql -f query='
+            query($project:ID!) {
+              node(id: $project) {
+                ... on ProjectV2 {
+                  items(first: 100) {
+                    nodes {
+                      id
+                      fieldValues(first: 10) {
+                        nodes {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                          }
+                        }
+                      }
+                      content {
+                        ... on Issue {
+                          number
+                          closedAt
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f project="$PROJECT_ID" \
+            --jq '.data.node.items.nodes[] | select(.fieldValues.nodes[].name == "Done") | select(.content.closedAt != null) | .id + "|" + .content.closedAt' \
+            | while IFS='|' read -r ITEM_ID CLOSED_AT; do
+              # Проверяем, прошло ли более 2 недель
+              CLOSED_DATE=$(date -d "$CLOSED_AT" +%s)
+              TWO_WEEKS_AGO=$(date -d "14 days ago" +%s)
+              
+              if [ "$CLOSED_DATE" -lt "$TWO_WEEKS_AGO" ]; then
+                echo "Removing item closed at $CLOSED_AT (more than 2 weeks ago)"
+                gh api graphql -f query='
+                  mutation($project:ID!, $item:ID!) {
+                    deleteProjectV2Item(input: {projectId: $project, itemId: $item}) {
+                      deletedItemId
+                    }
+                  }' -f project="$PROJECT_ID" -f item="$ITEM_ID"
+              fi
+            done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
