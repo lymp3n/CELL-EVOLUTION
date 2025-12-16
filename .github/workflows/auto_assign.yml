@@ -1,0 +1,37 @@
+# Автоматическое назначение ревьюверов по пути файлов
+groups:
+  core:
+    - 'src/cell_genesis/core/**'
+    reviewers:
+      - lead-dev-1
+      - core-dev-1
+      - core-dev-2
+  
+  evolution:
+    - 'src/cell_genesis/evolution/**'
+    reviewers:
+      - lead-dev-2
+      - evolution-dev-1
+      - evolution-dev-2
+  
+  graphics:
+    - 'src/cell_genesis/graphics/**'
+    - 'assets/**'
+    reviewers:
+      - ui-dev-1
+      - ui-dev-2
+      - designer-1
+      - designer-2
+  
+  ai:
+    - 'src/cell_genesis/ai/**'
+    - 'src/cell_genesis/environment/**'
+    reviewers:
+      - ai-dev-1
+      - ai-dev-2
+      - ai-dev-3
+
+# Автоматическое добавление лейблов
+addLabels: true
+skipUsers:
+  - dependabot[bot]
