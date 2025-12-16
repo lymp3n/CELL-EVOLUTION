@@ -1,9 +1,17 @@
 name: "🗂️ Sync Project Board with Issue Labels"
+
 on:
+  # Существующие триггеры
   issues:
     types: [labeled, unlabeled, opened, closed, reopened]
   pull_request_target:
     types: [opened, closed, reopened, review_requested]
+  # Новый триггер для перемещений в проекте (обратная синхронизация)
+  projectv2_item:
+    types: [edited]
+  # Опционально: для еженедельной очистки
+  schedule:
+    - cron: '0 9 * * 1'  # Каждый понедельник в 9:00
 
 permissions:
   issues: write
@@ -11,14 +19,16 @@ permissions:
   repository-projects: write
 
 jobs:
+  # 1. Синхронизация: Issue → Проект (по меткам)
   sync-issue-to-project:
-    if: github.event_name == 'issues'
+    if: github.event_name == 'issues' && github.event.sender.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Debug - Show event info
         run: |
           echo "Event: ${{ github.event_name }}"
           echo "Action: ${{ github.event.action }}"
+          echo "Sender: ${{ github.event.sender.login }}"
           echo "Issue: #${{ github.event.issue.number }}"
           echo "State: ${{ github.event.issue.state }}"
           echo "Labels: ${{ toJson(github.event.issue.labels) }}"
@@ -39,7 +49,13 @@ jobs:
             }' -f owner="${{ github.repository_owner }}" -f repo="${{ github.event.repository.name }}" \
             --jq '.data.repository.projectsV2.nodes[0].id')
           
+          if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
+            echo "❌ Project not found"
+            exit 1
+          fi
+          
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "Found project ID: $PROJECT_ID"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
@@ -54,21 +70,20 @@ jobs:
             COLUMN_NAME="Done"
           else
             # Ищем лейбл статуса
-            STATUS_LABELS="status: ready|status: in progress|status: in review|status: testing"
-            
-            # Получаем лейблы из события
             LABELS='${{ toJson(github.event.issue.labels) }}'
             
-            # Парсим лейблы (упрощенный вариант)
-            if echo "$LABELS" | grep -q "status: ready"; then
+            # Парсим лейблы (используем jq для надежности)
+            if echo "$LABELS" | jq -r '.[] | select(.name == "status: backlog") | .name' 2>/dev/null | grep -q "status: backlog"; then
+              COLUMN_NAME="Backlog"
+            elif echo "$LABELS" | jq -r '.[] | select(.name == "status: ready") | .name' 2>/dev/null | grep -q "status: ready"; then
               COLUMN_NAME="Ready"
-            elif echo "$LABELS" | grep -q "status: in progress"; then
+            elif echo "$LABELS" | jq -r '.[] | select(.name == "status: in progress") | .name' 2>/dev/null | grep -q "status: in progress"; then
               COLUMN_NAME="In Progress"
-            elif echo "$LABELS" | grep -q "status: in review"; then
+            elif echo "$LABELS" | jq -r '.[] | select(.name == "status: in review") | .name' 2>/dev/null | grep -q "status: in review"; then
               COLUMN_NAME="In Review"
-            elif echo "$LABELS" | grep -q "status: testing"; then
+            elif echo "$LABELS" | jq -r '.[] | select(.name == "status: testing") | .name' 2>/dev/null | grep -q "status: testing"; then
               COLUMN_NAME="Testing"
-            elif echo "$LABELS" | grep -q "status: done"; then
+            elif echo "$LABELS" | jq -r '.[] | select(.name == "status: done") | .name' 2>/dev/null | grep -q "status: done"; then
               COLUMN_NAME="Done"
             fi
           fi
@@ -84,7 +99,7 @@ jobs:
             query($project:ID!, $issue:ID!) {
               node(id: $project) {
                 ... on ProjectV2 {
-                  items(first: 20) {
+                  items(first: 50) {
                     nodes {
                       id
                       content {
@@ -152,6 +167,25 @@ jobs:
           
           if [ -z "$COLUMN_ID" ]; then
             echo "❌ Column '${{ steps.determine_column.outputs.COLUMN_NAME }}' not found"
+            echo "Available columns:"
+            gh api graphql -f query='
+              query($project:ID!) {
+                node(id: $project) {
+                  ... on ProjectV2 {
+                    fields(first: 20) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          name
+                          options {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
+              --jq '.data.node.fields.nodes[] | select(.name == "Status") | .options[].name' | tr '\n' ', '
             exit 1
           fi
           
@@ -175,9 +209,147 @@ jobs:
             }' -f project="${{ steps.get_project.outputs.PROJECT_ID }}" \
             -f item="${{ steps.get_item.outputs.ITEM_ID }}" \
             -f status="$COLUMN_ID"
+          
+          echo "✅ Successfully moved issue #${{ github.event.issue.number }} to ${{ steps.determine_column.outputs.COLUMN_NAME }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # 2. Синхронизация: Проект → Issue (по перемещению карточек)
+  sync-project-to-issue:
+    if: github.event_name == 'projectv2_item' && github.event.action == 'edited' && github.event.sender.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📋 Debug - Show project event info
+        run: |
+          echo "Project ID: ${{ github.event.projectv2_item.project_node_id }}"
+          echo "Item ID: ${{ github.event.projectv2_item.node_id }}"
+          echo "Sender: ${{ github.event.sender.login }}"
+      
+      - name: 🔍 Get project item details
+        id: get_item
+        run: |
+          ITEM_DETAILS=$(gh api graphql -f query='
+            query($item: ID!) {
+              node(id: $item) {
+                ... on ProjectV2Item {
+                  content {
+                    ... on Issue {
+                      id
+                      number
+                      title
+                    }
+                  }
+                  fieldValueByName(name: "Status") {
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      name
+                    }
+                  }
+                }
+              }
+            }' -f item="${{ github.event.projectv2_item.node_id }}" --silent)
+          
+          ISSUE_NUMBER=$(echo "$ITEM_DETAILS" | jq -r '.data.node.content.number // empty')
+          ISSUE_TITLE=$(echo "$ITEM_DETAILS" | jq -r '.data.node.content.title // empty')
+          STATUS_NAME=$(echo "$ITEM_DETAILS" | jq -r '.data.node.fieldValueByName.name // empty')
+          
+          if [ -z "$ISSUE_NUMBER" ] || [ "$ISSUE_NUMBER" = "null" ]; then
+            echo "⚠️ Item content is not an Issue, skipping."
+            echo "IS_ISSUE=false" >> $GITHUB_OUTPUT
+          else
+            echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+            echo "Found Issue #$ISSUE_NUMBER: $ISSUE_TITLE"
+          fi
+          
+          if [ -n "$STATUS_NAME" ] && [ "$STATUS_NAME" != "null" ]; then
+            echo "STATUS_NAME=$STATUS_NAME" >> $GITHUB_OUTPUT
+            echo "Current status in project: $STATUS_NAME"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🎯 Map project status to issue label
+        id: map_label
+        if: steps.get_item.outputs.IS_ISSUE != 'false' && steps.get_item.outputs.STATUS_NAME != ''
+        run: |
+          STATUS_NAME="${{ steps.get_item.outputs.STATUS_NAME }}"
+          
+          case "$STATUS_NAME" in
+            "Backlog")
+              NEW_LABEL="status: backlog"
+              ;;
+            "Ready")
+              NEW_LABEL="status: ready"
+              ;;
+            "In Progress")
+              NEW_LABEL="status: in progress"
+              ;;
+            "In Review")
+              NEW_LABEL="status: in review"
+              ;;
+            "Testing")
+              NEW_LABEL="status: testing"
+              ;;
+            "Done")
+              NEW_LABEL="status: done"
+              ;;
+            *)
+              NEW_LABEL=""
+              echo "ℹ️ No label mapping for status: $STATUS_NAME"
+              ;;
+          esac
+          
+          if [ -n "$NEW_LABEL" ]; then
+            echo "NEW_LABEL=$NEW_LABEL" >> $GITHUB_OUTPUT
+            echo "Mapped to label: $NEW_LABEL"
+          fi
+      
+      - name: 🏷️ Update issue labels
+        if: steps.map_label.outputs.NEW_LABEL != ''
+        run: |
+          ISSUE_NUM="${{ steps.get_item.outputs.ISSUE_NUMBER }}"
+          NEW_LABEL="${{ steps.map_label.outputs.NEW_LABEL }}"
+          
+          # Получаем текущие метки
+          CURRENT_LABELS=$(gh issue view "$ISSUE_NUM" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+          
+          # Проверяем, есть ли уже такая метка
+          if echo "$CURRENT_LABELS" | grep -q "^$NEW_LABEL$"; then
+            echo "✅ Issue already has label: $NEW_LABEL, skipping."
+            exit 0
+          fi
+          
+          echo "Updating issue #$ISSUE_NUM labels..."
+          
+          # Удаляем старые статус-метки
+          for label in $CURRENT_LABELS; do
+            if [[ "$label" == status:* ]]; then
+              echo "Removing old status label: $label"
+              gh issue edit "$ISSUE_NUM" --remove-label "$label" 2>/dev/null || true
+            fi
+          done
+          
+          # Добавляем новую метку статуса
+          echo "Adding new status label: $NEW_LABEL"
+          gh issue edit "$ISSUE_NUM" --add-label "$NEW_LABEL"
+          
+          # Если статус "Done" в проекте, закрываем issue
+          if [ "$NEW_LABEL" = "status: done" ]; then
+            echo "Closing issue #$ISSUE_NUM (moved to Done)"
+            gh issue edit "$ISSUE_NUM" --state closed
+          # Если статус не "Done", но issue закрыт - открываем
+          elif [ "$NEW_LABEL" != "status: done" ]; then
+            ISSUE_STATE=$(gh issue view "$ISSUE_NUM" --json state --jq '.state' 2>/dev/null || echo "open")
+            if [ "$ISSUE_STATE" = "CLOSED" ]; then
+              echo "Reopening issue #$ISSUE_NUM (moved from Done)"
+              gh issue edit "$ISSUE_NUM" --state open
+            fi
+          fi
+          
+          echo "✅ Successfully updated issue #$ISSUE_NUM"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 3. Синхронизация PR → Issue
   sync-pr-to-project:
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
@@ -187,6 +359,7 @@ jobs:
           echo "PR: #${{ github.event.pull_request.number }}"
           echo "State: ${{ github.event.pull_request.state }}"
           echo "Merged: ${{ github.event.pull_request.merged }}"
+          echo "Title: ${{ github.event.pull_request.title }}"
       
       - name: 🔍 Find related issue
         id: find_issue
@@ -204,20 +377,14 @@ jobs:
             ISSUE_NUMBERS+=($(echo "${{ github.event.pull_request.body }}" | grep -o '#[0-9]\+' | sed 's/#//'))
           fi
           
-          # Ищем в коммитах
-          COMMIT_MSG=$(gh pr view "${{ github.event.pull_request.number }}" --json commits --jq '.commits[].message' 2>/dev/null || true)
-          if [[ "$COMMIT_MSG" =~ #[0-9]+ ]]; then
-            ISSUE_NUMBERS+=($(echo "$COMMIT_MSG" | grep -o '#[0-9]\+' | sed 's/#//'))
-          fi
-          
-          # Убираем дубликаты
-          UNIQUE_ISSUES=($(echo "${ISSUE_NUMBERS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-          
-          if [ ${#UNIQUE_ISSUES[@]} -gt 0 ]; then
+          # Убираем дубликаты и оставляем только первый номер
+          if [ ${#ISSUE_NUMBERS[@]} -gt 0 ]; then
+            UNIQUE_ISSUES=($(printf "%s\n" "${ISSUE_NUMBERS[@]}" | sort -u))
             echo "Found issues: ${UNIQUE_ISSUES[@]}"
             echo "ISSUE_NUMBERS=${UNIQUE_ISSUES[0]}" >> $GITHUB_OUTPUT
           else
-            echo "No related issues found"
+            echo "No related issues found in PR title/body"
+            echo "ISSUE_NUMBERS=" >> $GITHUB_OUTPUT
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -230,19 +397,20 @@ jobs:
           # Определяем новый статус
           if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
             NEW_STATUS="status: testing"
-            echo "PR merged, moving issue #$ISSUE_NUM to testing"
+            echo "✅ PR merged, moving issue #$ISSUE_NUM to testing"
           elif [ "${{ github.event.pull_request.state }}" = "closed" ]; then
             NEW_STATUS="status: in progress"
-            echo "PR closed without merge, moving issue #$ISSUE_NUM back to in progress"
+            echo "🔄 PR closed without merge, moving issue #$ISSUE_NUM back to in progress"
           else
             # PR открыт
+            echo "PR opened, checking reviews..."
             REVIEWERS=$(gh pr view "${{ github.event.pull_request.number }}" --json reviews --jq '.reviews[].author.login' 2>/dev/null || true)
             if [ -n "$REVIEWERS" ]; then
               NEW_STATUS="status: in review"
-              echo "PR has reviews, moving issue #$ISSUE_NUM to in review"
+              echo "👀 PR has reviews, moving issue #$ISSUE_NUM to in review"
             else
               NEW_STATUS="status: in progress"
-              echo "PR opened, issue #$ISSUE_NUM stays in progress"
+              echo "✏️ PR opened, issue #$ISSUE_NUM stays in progress"
             fi
           fi
           
@@ -253,22 +421,27 @@ jobs:
           for label in $CURRENT_LABELS; do
             if [[ "$label" == status:* ]]; then
               echo "Removing label: $label"
-              gh issue edit "$ISSUE_NUM" --remove-label "$label" || true
+              gh issue edit "$ISSUE_NUM" --remove-label "$label" 2>/dev/null || true
             fi
           done
           
           # Добавляем новый статус
           echo "Adding label: $NEW_STATUS"
           gh issue edit "$ISSUE_NUM" --add-label "$NEW_STATUS"
+          
+          echo "✅ Updated issue #$ISSUE_NUM to $NEW_STATUS"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # 4. Еженедельная очистка (опционально)
   weekly-cleanup:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: 🧹 Clean up old 'Done' items
         run: |
+          echo "Starting weekly cleanup of old Done items..."
+          
           # Получаем проект
           PROJECT_ID=$(gh api graphql -f query='
             query($owner:String!, $repo:String!) {
@@ -276,11 +449,14 @@ jobs:
                 projectsV2(first: 1, query: "CELL-EVOLUTION") {
                   nodes {
                     id
+                    title
                   }
                 }
               }
             }' -f owner="${{ github.repository_owner }}" -f repo="${{ github.event.repository.name }}" \
             --jq '.data.repository.projectsV2.nodes[0].id')
+          
+          echo "Project ID: $PROJECT_ID"
           
           # Находим задачи в колонке "Done", которые завершены более 2 недель назад
           gh api graphql -f query='
@@ -308,21 +484,27 @@ jobs:
                 }
               }
             }' -f project="$PROJECT_ID" \
-            --jq '.data.node.items.nodes[] | select(.fieldValues.nodes[].name == "Done") | select(.content.closedAt != null) | .id + "|" + .content.closedAt' \
-            | while IFS='|' read -r ITEM_ID CLOSED_AT; do
+            --jq '.data.node.items.nodes[] | select(.fieldValues.nodes[].name == "Done") | select(.content.closedAt != null) | .id + "|" + .content.closedAt + "|" + .content.number' \
+            | while IFS='|' read -r ITEM_ID CLOSED_AT ISSUE_NUM; do
               # Проверяем, прошло ли более 2 недель
-              CLOSED_DATE=$(date -d "$CLOSED_AT" +%s)
-              TWO_WEEKS_AGO=$(date -d "14 days ago" +%s)
-              
-              if [ "$CLOSED_DATE" -lt "$TWO_WEEKS_AGO" ]; then
-                echo "Removing item closed at $CLOSED_AT (more than 2 weeks ago)"
-                gh api graphql -f query='
-                  mutation($project:ID!, $item:ID!) {
-                    deleteProjectV2Item(input: {projectId: $project, itemId: $item}) {
-                      deletedItemId
-                    }
-                  }' -f project="$PROJECT_ID" -f item="$ITEM_ID"
+              if [ -n "$CLOSED_AT" ] && [ "$CLOSED_AT" != "null" ]; then
+                CLOSED_DATE=$(date -d "$CLOSED_AT" +%s 2>/dev/null || date +%s)
+                TWO_WEEKS_AGO=$(date -d "14 days ago" +%s)
+                
+                if [ "$CLOSED_DATE" -lt "$TWO_WEEKS_AGO" ]; then
+                  echo "Removing item for issue #$ISSUE_NUM closed at $CLOSED_AT (more than 2 weeks ago)"
+                  gh api graphql -f query='
+                    mutation($project:ID!, $item:ID!) {
+                      deleteProjectV2Item(input: {projectId: $project, itemId: $item}) {
+                        deletedItemId
+                      }
+                    }' -f project="$PROJECT_ID" -f item="$ITEM_ID" 2>/dev/null || echo "Failed to delete item $ITEM_ID"
+                else
+                  echo "Keeping issue #$ISSUE_NUM (closed at $CLOSED_AT)"
+                fi
               fi
             done
+          
+          echo "✅ Weekly cleanup completed"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
