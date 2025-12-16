@@ -1,0 +1,69 @@
+name: Project Automation
+on:
+  issues:
+    types: [opened, labeled, closed]
+  pull_request:
+    types: [opened, closed, labeled]
+
+jobs:
+  automate-project-column:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const { issue, label } = context.payload;
+            
+            // Автоматическое перемещение issue по колонкам
+            if (context.eventName === 'issues') {
+              if (context.payload.action === 'opened') {
+                // Новая issue → To Do
+                await github.projects.createCard({
+                  column_id: 12345678, // ID колонки "To Do"
+                  content_id: issue.id,
+                  content_type: 'Issue'
+                });
+              }
+              if (context.payload.action === 'closed') {
+                // Закрытая issue → Done
+                await moveCardToColumn(issue.id, 'Done');
+              }
+            }
+            
+            // Для PR
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              if (context.payload.action === 'opened') {
+                await github.projects.createCard({
+                  column_id: 12345679, // ID колонки "In Progress"
+                  content_id: pr.id,
+                  content_type: 'PullRequest'
+                });
+              }
+            }
+            
+            async function moveCardToColumn(contentId, columnName) {
+              const projectId = 1; // ID вашего проекта
+              const columns = await github.projects.listColumns({
+                project_id: projectId
+              });
+              
+              const targetColumn = columns.data.find(col => col.name === columnName);
+              if (targetColumn) {
+                const cards = await github.projects.listCards({
+                  column_id: targetColumn.id
+                });
+                
+                const card = cards.data.find(c => 
+                  c.content_url && c.content_url.includes(`/${contentId}`)
+                );
+                
+                if (!card) {
+                  await github.projects.createCard({
+                    column_id: targetColumn.id,
+                    content_id: contentId,
+                    content_type: 'Issue'
+                  });
+                }
+              }
+            }
