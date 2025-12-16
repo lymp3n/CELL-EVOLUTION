@@ -41,4 +41,4 @@ jobs:
     - name: Run tests
       run: |
         pip install pytest
-        if [ -d "src/tests" ]; then pytest src/tests/ -v; else echo "Папка с тестами не найдена, пропускаем."; fi
+        if [ -d "src/tests" ]; then pytest src/tests/ -v --maxfail=3 --disable-warnings; else echo "Папка с тестами не найдена, пропускаем."; fi
