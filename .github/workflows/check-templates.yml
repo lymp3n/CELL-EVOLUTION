@@ -55,12 +55,13 @@ jobs:
         run: |
           echo "Проверяю фронтматер шаблонов..."
           python - <<EOF
+        try:
           import os
           import yaml
-          
+      
           template_dir = '.github/ISSUE_TEMPLATE'
           templates = ['bug_report.md', 'design_task.md', 'technical_task.md', 'feature_request.md']
-          
+      
           for template in templates:
               path = os.path.join(template_dir, template)
               if os.path.exists(path):
@@ -72,14 +73,17 @@ jobs:
                               try:
                                   data = yaml.safe_load(parts[1])
                                   print(f'✅ {template}: фронтматер валиден')
-                                  print(f'   Название: {data.get(\"name\", \"нет\")}')
+                                  print(f'   Название: {data.get("name", "нет")}')
                               except Exception as e:
                                   print(f'❌ {template}: ошибка в фронтматере: {e}')
                           else:
                               print(f'❌ {template}: нет фронтматера')
                       else:
-                        print(f'❌ {template}: отсутствует разделитель "---"')
-          EOF || echo "Ошибка проверки фронтматера"
+                          print(f'❌ {template}: отсутствует разделитель "---"')
+      except Exception as e:
+          print(f"Ошибка выполнения скрипта: {e}")
+      EOF || echo "Обнаружена ошибка при проверке фронтматера"
+
       
       - name: Create test issue (для нового репозитория)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
