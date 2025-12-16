@@ -1,0 +1,102 @@
+name: Daily Standup Reminder
+on:
+  schedule:
+    # Каждый будний день в 9:00 по Москве
+    - cron: '0 6 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  standup-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate standup report
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Получаем все открытые issue, назначенные на пользователей
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              assignee: '*' // Все назначенные задачи
+            });
+            
+            // Группируем по назначенным
+            const assignments = {};
+            for (const issue of issues.data) {
+              for (const assignee of issue.assignees) {
+                if (!assignments[assignee.login]) {
+                  assignments[assignee.login] = [];
+                }
+                assignments[assignee.login].push({
+                  number: issue.number,
+                  title: issue.title,
+                  url: issue.html_url,
+                  labels: issue.labels.map(l => l.name)
+                });
+              }
+            }
+            
+            // Формируем отчет
+            const date = new Date().toLocaleDateString('ru-RU');
+            let report = `# 📊 Ежедневный стендап ${date}\n\n`;
+            report += `_Сгенерировано автоматически_\n\n`;
+            
+            for (const [username, tasks] of Object.entries(assignments)) {
+              report += `## @${username}\n`;
+              
+              const inProgress = tasks.filter(t => t.labels.includes('status: in progress'));
+              const inReview = tasks.filter(t => t.labels.includes('status: in review'));
+              const testing = tasks.filter(t => t.labels.includes('status: testing'));
+              
+              if (inProgress.length > 0) {
+                report += `**В работе:**\n`;
+                inProgress.forEach(task => {
+                  report += `- ${task.title} [#${task.number}](${task.url})\n`;
+                });
+              }
+              
+              if (inReview.length > 0) {
+                report += `**На ревью:**\n`;
+                inReview.forEach(task => {
+                  report += `- ${task.title} [#${task.number}](${task.url})\n`;
+                });
+              }
+              
+              if (testing.length > 0) {
+                report += `**В тестировании:**\n`;
+                testing.forEach(task => {
+                  report += `- ${task.title} [#${task.number}](${task.url})\n`;
+                });
+              }
+              
+              report += `\n**Вопросы:**\n`;
+              report += `1. Что сделано вчера?\n`;
+              report += `2. Что планируете сегодня?\n`;
+              report += `3. Есть ли блокеры?\n\n`;
+            }
+            
+            // Создаем issue для стендапа
+            const standupIssue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📅 Стендап ${date}`,
+              body: report,
+              labels: ['standup', 'automated']
+            });
+            
+            // Уведомляем в комментариях всех участников
+            const participants = Object.keys(assignments).map(u => `@${u}`).join(' ');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: standupIssue.data.number,
+              body: `${participants}\n\nПожалуйста, оставьте свои ответы в комментариях!`
+            });
+            
+            // Добавляем в проект
+            await github.rest.projects.createCard({
+              column_id: process.env.STANDUP_COLUMN_ID, // ID колонки для стендапов
+              content_id: standupIssue.data.id,
+              content_type: 'Issue'
+            });
