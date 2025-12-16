@@ -15,6 +15,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
@@ -27,10 +28,10 @@ jobs:
 
     - name: Lint with flake8
       run: |
-        pip install flake8
-        # Останавливаемся только на критических ошибках
+        pip install pytest flake8 black
+        # Проверка ошибок, остановка только на критических
         flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
-        # Предупреждения для стиля
+        # Проверка стиля, не останавливать сборку
         flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Check formatting with black
@@ -42,3 +43,4 @@ jobs:
       run: |
         pip install pytest
         if [ -d "src/tests" ]; then pytest src/tests/ -v --maxfail=3 --disable-warnings; else echo "Папка с тестами не найдена, пропускаем."; fi
+
