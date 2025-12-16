@@ -64,7 +64,7 @@ jobs:
           for template in templates:
               path = os.path.join(template_dir, template)
               if os.path.exists(path):
-                  with open(path, 'r') as f:
+                  with open(path, 'r', encoding='utf-8') as f:
                       content = f.read()
                       if '---' in content:
                           parts = content.split('---')
@@ -77,6 +77,8 @@ jobs:
                                   print(f'❌ {template}: ошибка в фронтматере: {e}')
                           else:
                               print(f'❌ {template}: нет фронтматера')
+                      else:
+                        print(f'❌ {template}: отсутствует разделитель "---"')
                   "
       
       - name: Create test issue (для нового репозитория)
@@ -87,8 +89,12 @@ jobs:
           echo "Создан автоматически при настройке шаблонов." >> /tmp/test_body.md
           
           # Используем GitHub CLI для создания тестового issue
-          gh issue create \
-            --title "[TEST] Проверка шаблонов" \
-            --body-file /tmp/test_body.md \
-            --label "test" \
-            --assignee "${{ github.actor }}" || echo "GitHub CLI не настроен, пропускаем создание issue"
+          if command -v gh > /dev/null; then
+            gh issue create \
+              --title "[TEST] Проверка шаблонов" \
+              --body-file /tmp/test_body.md \
+              --label "test" \
+              --assignee "${{ github.actor }}" || echo "GitHub CLI не настроен, пропускаем создание issue"
+          else
+            echo "GitHub CLI не найден, пропускаем создание issue"
+          fi
