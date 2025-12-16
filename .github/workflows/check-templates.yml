@@ -54,7 +54,7 @@ jobs:
       - name: Check template frontmatter
         run: |
           echo "Проверяю фронтматер шаблонов..."
-          python -c "
+          python - <<EOF
           import os
           import yaml
           
@@ -79,7 +79,7 @@ jobs:
                               print(f'❌ {template}: нет фронтматера')
                       else:
                         print(f'❌ {template}: отсутствует разделитель "---"')
-                  "
+          EOF || echo "Ошибка проверки фронтматера"
       
       - name: Create test issue (для нового репозитория)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
