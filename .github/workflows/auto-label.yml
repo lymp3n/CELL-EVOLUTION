@@ -1,0 +1,92 @@
+name: Auto Label Issues
+on:
+  issues:
+    types: [opened, edited]
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  auto-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-label based on title
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { issue, pull_request } = context.payload;
+            const target = issue || pull_request;
+            
+            if (!target) return;
+            
+            const title = target.title.toLowerCase();
+            const body = target.body?.toLowerCase() || '';
+            const text = title + ' ' + body;
+            
+            const labelsToAdd = [];
+            
+            // Определяем тип по заголовку
+            if (title.startsWith('[design]') || title.includes('дизайн')) {
+              labelsToAdd.push('type: design', 'component: assets');
+            } else if (title.startsWith('[dev]') || title.includes('разработка') || title.includes('feature')) {
+              labelsToAdd.push('type: feature', 'component: core');
+            } else if (title.startsWith('[bug]') || title.includes('ошибка') || title.includes('баг')) {
+              labelsToAdd.push('type: bug', 'priority: high');
+            }
+            
+            // Определяем компонент по тексту
+            const componentKeywords = {
+              'core': ['ядро', 'cell', 'клетка', 'физика', 'метаболизм'],
+              'evolution': ['эволюция', 'ген', 'мутация', 'улучшение'],
+              'graphics': ['графика', 'рендер', 'отрисовка', 'спрайт'],
+              'ui': ['интерфейс', 'ui', 'ux', 'кнопка', 'меню'],
+              'ai': ['искусственный интеллект', 'ии', 'поведение', 'нейросеть'],
+              'physics': ['физика', 'движение', 'коллизия', 'столкновение'],
+              'assets': ['ассет', 'текстура', 'звук', 'шрифт']
+            };
+            
+            for (const [component, keywords] of Object.entries(componentKeywords)) {
+              if (keywords.some(keyword => text.includes(keyword))) {
+                labelsToAdd.push(`component: ${component}`);
+                break;
+              }
+            }
+            
+            // Определяем сложность
+            const difficultyKeywords = {
+              'beginner': ['простой', 'легкий', 'начальный', 'good first issue'],
+              'intermediate': ['средний', 'умеренный'],
+              'advanced': ['сложный', 'продвинутый'],
+              'expert': ['экспертный', 'архитектура', 'оптимизация']
+            };
+            
+            for (const [difficulty, keywords] of Object.entries(difficultyKeywords)) {
+              if (keywords.some(keyword => text.includes(keyword))) {
+                labelsToAdd.push(`difficulty: ${difficulty}`);
+                break;
+              }
+            }
+            
+            // Добавляем лейблы
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: target.number,
+                labels: [...new Set(labelsToAdd)] // Убираем дубликаты
+              });
+            }
+            
+            // Для новых issue без статуса добавляем статус
+            if (issue && issue.state === 'open') {
+              const existingLabels = target.labels?.map(l => l.name) || [];
+              const hasStatus = existingLabels.some(l => l.startsWith('status:'));
+              
+              if (!hasStatus) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: target.number,
+                  labels: ['status: backlog']
+                });
+              }
+            }
