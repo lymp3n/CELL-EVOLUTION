@@ -1,0 +1,206 @@
+[33mcommit 36db21d92fe1eb20beec9a0b975420ba6c072f00[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32meating_and_energy[m[33m)[m
+Author: Zakir <zaksulejmanov560@gmail.com>
+Date:   Wed Dec 17 11:47:30 2025 +0300
+
+    Добавил систему поедания и спавн еды
+
+[33mcommit d0ce6bbeb83e05b642a2ba63e1d2d9a4f7a776d1[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 17:14:38 2025 +0300
+
+    Update project-automation.yml
+
+[33mcommit 9c8d8c0dcc18bbd7b90a133d7d6ae609168ded73[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:43:35 2025 +0300
+
+    Update project-automation.yml
+
+[33mcommit f3e0b2e3e1528c7eb35f439fdbf69001eb0aca61[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:41:04 2025 +0300
+
+    Update create_manager_task.py
+
+[33mcommit 5a97c0f7feb9f181369f51ed6fb9cd67e858e688[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:40:11 2025 +0300
+
+    Update setup_templates.py
+
+[33mcommit 59a34620e3735c6e6902ac67135c5fa933b1b024[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:38:56 2025 +0300
+
+    Update project_helper.py
+
+[33mcommit c27c6c125a5cd607e0fc6af30bb1418f7d58ebc9[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:35:58 2025 +0300
+
+    Update setup_dev.py
+
+[33mcommit 18ffcf50d17d046ec82b40cfda3230843d08a0a5[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:34:47 2025 +0300
+
+    Update setup_dev.py
+
+[33mcommit f165880f05f8169d318fe92fa42cf662e3fbbff9[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:30:29 2025 +0300
+
+    Update setup_dev.py
+
+[33mcommit 5abd0fe0f74d4085c73e1877f2059474f608aa55[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 16:28:55 2025 +0300
+
+    Update dev_helper.py
+
+[33mcommit 3ed4acbea8ab2275d5f187c2f9fcabab538a5e5e[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 15:58:30 2025 +0300
+
+    Add scheduled workflow for manager tasks creation
+
+[33mcommit 34bec99db551d89d053f2f0459612bf198bd4690[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 15:54:32 2025 +0300
+
+    Add script for automated manager task creation
+    
+    This script automates the creation of standard manager tasks using the GitHub CLI, providing templates for various task types such as sprint planning, daily standups, retrospectives, progress reports, and risk management.
+
+[33mcommit 92a45c446bc086ba7d55feb082d9cacbe140034d[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 15:53:25 2025 +0300
+
+    Add manager task template to issue templates
+    
+    Добавлен шаблон задачи для менеджеров и тимлидов, включающий поля для описания задач, участников и метрик успеха.
+
+[33mcommit a87e34907282a9909e213b2ddbc9ea30271a1108[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 15:18:07 2025 +0300
+
+    Update ci.yml
+    
+    46 добавлено  --tb=short в целях проверки ошибки
+
+[33mcommit cd78f12a3d317e65ce06ec3c8b599e7d2a0e3ae1[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 15:16:20 2025 +0300
+
+    Update ci.yml
+    
+    В коде 46 убрано and true
+
+[33mcommit 4a5d15b83da16b23e7f564ae63dfb92271ca7516[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 15:14:35 2025 +0300
+
+    Update ci.yml
+    
+    приделано после условия в том же 45 - 50
+
+[33mcommit 5a119cc459a16a99db49dd700ab31150ddf427f9[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 15:10:41 2025 +0300
+
+    Update ci.yml
+    
+    Добавлено условие и изменини с 45 до 51
+    if [ -d "src/tests" ]; then
+          pytest src/tests/ -v --maxfail=3 --disable-warnings
+          echo "pytest вернул код: $?"
+        else
+          echo "Папка с тестами не найдена, пропускаем."
+        fi
+
+[33mcommit ca3378fe06079fcf34980a4f8deb3464a0b22fca[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 15:05:27 2025 +0300
+
+    Update check-templates.yml
+    
+    except Exception as e:
+        print(f"Ошибка выполнения скрипта: {e}")
+    EOF || echo "Обнаружена ошибка при проверке фронтматера"
+    добавлено из мине но
+
+[33mcommit 1b736252d1da1d3ecd71470f6bc004c6b97a39d6[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 14:57:45 2025 +0300
+
+    Update check-templates.yml
+    
+    Добавил EOF || echo "Ошибка проверки фронтматера"
+    Изменил python - <<EOF
+
+[33mcommit a9389603d7d909342af886ee9a43da75ed18ce9b[m
+Author: zaksulejmanov560-star <zaksulejmanov560@gmail.com>
+Date:   Tue Dec 16 14:47:44 2025 +0300
+
+    Update check-templates.yml
+    
+    В коде for template in templates:
+                  path = os.path.join(template_dir, template)
+                  if os.path.exists(path):
+                      with open(path, 'r', encoding='utf-8') as f:
+                          content = f.read()
+                          if '---' in content:
+                              parts = content.split('---')
+                              if len(parts) >= 3:
+                                  try:
+                                      data = yaml.safe_load(parts[1])
+                                      print(f'✅ {template}: фронтматер валиден')
+                                      print(f'   Название: {data.get(\"name\", \"нет\")}')
+                                  except Exception as e:
+                                      print(f'❌ {template}: ошибка в фронтматере: {e}')
+                              else:
+                                  print(f'❌ {template}: нет фронтматера')
+                          else:
+                            print(f'❌ {template}: отсутствует разделитель "---"')
+    Изменил with open(path, 'r', encoding='utf-8') as f:
+    Добавил else:
+                    print(f'❌ {template}: отсутствует разделитель "---"')
+    И в коде gh issue create \
+        --title "[TEST] Проверка шаблонов" \
+        --body-file /tmp/test_body.md \
+        --label "test" \
+        --assignee "${{ github.actor }}" || echo "Не удалось создать issue через gh"
+    Добавил условие if command -v gh > /dev/null; then
+
+[33mcommit ba6c87ff86c7cb677596cddb8c8870d4c76965ad[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 13:51:40 2025 +0300
+
+    Revise feature proposal template structure
+    
+    Updated feature proposal template for better clarity and structure. Changed labels, assignees format, and added new sections for user input.
+
+[33mcommit 921e2357b44dccc69c198e4a55118e95b8ad92a8[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 13:50:45 2025 +0300
+
+    Rename bug report template from md to yml
+
+[33mcommit 93fe7ca1f41c4ea4cfbf66f45bfeabbe0399ac49[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 13:49:57 2025 +0300
+
+    Fix assignees field format in designer_task.yml
+    
+    Changed assignees field from an empty string to an empty array in the designer task template.
+
+[33mcommit 88fc96b9af5356cc738aec2da9c56ce108ec0782[m
+Author: lymp3n <144620320+lymp3n@users.noreply.github.com>
+Date:   Tue Dec 16 13:49:39 2025 +0300
+
+    Fix assignees field in developer_task.yml
+    
+    Changed assignees field from an empty string to an empty array for better structure.
+
+[33mcommit 8cb6d5ad1f5a3f694537ba220225265694415420[m
+Author:
