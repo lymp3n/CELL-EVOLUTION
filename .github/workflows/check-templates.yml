@@ -1,0 +1,104 @@
+name: Check Issue Templates
+on:
+  push:
+    paths:
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/check-templates.yml'
+  pull_request:
+    paths:
+      - '.github/ISSUE_TEMPLATE/**'
+
+jobs:
+  check-templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check template files exist
+        run: |
+          required_files=(
+            ".github/ISSUE_TEMPLATE/config.yml"
+            ".github/ISSUE_TEMPLATE/bug_report.md"
+            ".github/ISSUE_TEMPLATE/design_task.md"
+            ".github/ISSUE_TEMPLATE/technical_task.md"
+            ".github/ISSUE_TEMPLATE/feature_request.md"
+          )
+          
+          missing=()
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing+=("$file")
+            fi
+          done
+          
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ Отсутствуют файлы:"
+            printf '%s\n' "${missing[@]}"
+            exit 1
+          else
+            echo "✅ Все необходимые файлы шаблонов на месте"
+          fi
+      
+      - name: Validate config.yml
+        run: |
+          if [ -f ".github/ISSUE_TEMPLATE/config.yml" ]; then
+            echo "Проверяю config.yml..."
+            # Простая проверка что это валидный YAML
+            python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/config.yml'))"
+            echo "✅ config.yml валиден"
+          else
+            echo "❌ config.yml не найден"
+            exit 1
+          fi
+      
+      - name: Check template frontmatter
+        run: |
+          echo "Проверяю фронтматер шаблонов..."
+          python - <<EOF
+        try:
+          import os
+          import yaml
+      
+          template_dir = '.github/ISSUE_TEMPLATE'
+          templates = ['bug_report.md', 'design_task.md', 'technical_task.md', 'feature_request.md']
+      
+          for template in templates:
+              path = os.path.join(template_dir, template)
+              if os.path.exists(path):
+                  with open(path, 'r', encoding='utf-8') as f:
+                      content = f.read()
+                      if '---' in content:
+                          parts = content.split('---')
+                          if len(parts) >= 3:
+                              try:
+                                  data = yaml.safe_load(parts[1])
+                                  print(f'✅ {template}: фронтматер валиден')
+                                  print(f'   Название: {data.get("name", "нет")}')
+                              except Exception as e:
+                                  print(f'❌ {template}: ошибка в фронтматере: {e}')
+                          else:
+                              print(f'❌ {template}: нет фронтматера')
+                      else:
+                          print(f'❌ {template}: отсутствует разделитель "---"')
+      except Exception as e:
+          print(f"Ошибка выполнения скрипта: {e}")
+      EOF || echo "Обнаружена ошибка при проверке фронтматера"
+
+      
+      - name: Create test issue (для нового репозитория)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "Это тестовый issue для проверки шаблонов" > /tmp/test_body.md
+          echo "" >> /tmp/test_body.md
+          echo "Создан автоматически при настройке шаблонов." >> /tmp/test_body.md
+          
+          # Используем GitHub CLI для создания тестового issue
+          if command -v gh > /dev/null; then
+            gh issue create \
+              --title "[TEST] Проверка шаблонов" \
+              --body-file /tmp/test_body.md \
+              --label "test" \
+              --assignee "${{ github.actor }}" || echo "GitHub CLI не настроен, пропускаем создание issue"
+          else
+            echo "GitHub CLI не найден, пропускаем создание issue"
+          fi

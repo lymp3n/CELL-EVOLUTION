@@ -1,0 +1,5 @@
+blank_issues_enabled: false  # Запрещает создавать issue без шаблона
+contact_links:
+  - name: 📖 Полное руководство по шаблонам
+    url: https://github.com/lymp3n/CELL-EVOLUTION/blob/main/.github/ISSUE_TEMPLATE/README_TEMPLATES.md
+    about: Прочтите инструкцию, как правильно создавать задачи

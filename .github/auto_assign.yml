@@ -1,0 +1,75 @@
+# Автоматическое назначение ревьюверов и исполнителей
+groups:
+  core-team:
+    - 'src/cell_genesis/core/**'
+    - 'src/cell_genesis/utils/**'
+    reviewers:
+      - lead-dev-1
+      - core-dev-1
+      - core-dev-2
+    assignees:
+      - core-dev-1
+      - core-dev-2
+      
+  evolution-team:
+    - 'src/cell_genesis/evolution/**'
+    reviewers:
+      - lead-dev-2
+      - evolution-dev-1
+      - evolution-dev-2
+    assignees:
+      - evolution-dev-1
+      - evolution-dev-2
+      
+  graphics-team:
+    - 'src/cell_genesis/graphics/**'
+    - 'assets/sprites/**'
+    reviewers:
+      - ui-dev-1
+      - ui-dev-2
+      - designer-1
+    assignees:
+      - ui-dev-1
+      - ui-dev-2
+      
+  ai-team:
+    - 'src/cell_genesis/ai/**'
+    - 'src/cell_genesis/environment/**'
+    reviewers:
+      - ai-dev-1
+      - ai-dev-2
+      - ai-dev-3
+    assignees:
+      - ai-dev-1
+      - ai-dev-2
+      
+  design-team:
+    - 'assets/design/**'
+    - '.github/ISSUE_TEMPLATE/design_task.md'
+    reviewers:
+      - designer-1
+      - designer-2
+      - designer-3
+      - designer-4
+    assignees:
+      - designer-1
+      - designer-2
+
+# Количество обязательных ревьюверов
+numberOfReviewers: 2
+
+# Исключить автора из ревьюверов
+excludeAuthor: true
+
+# Добавить эти лейблы при создании PR
+addLabels: true
+labels:
+  - needs-review
+
+# Автоматически запрашивать ревью при открытии PR
+runOnDraft: false
+
+# Игнорировать этих пользователей (боты)
+skipUsers:
+  - dependabot[bot]
+  - github-actions[bot]
